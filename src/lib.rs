@@ -1,3 +1,4 @@
+pub mod cache;
 pub mod cli;
 pub mod configs;
 pub mod dirty_paths;

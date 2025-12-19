@@ -9,7 +9,7 @@ use crate::{
     configs::Config,
     dirty_paths::DirtyUtf8Path,
     error::TmsError,
-    repos::{find_repos, find_submodules, RepoProvider},
+    repos::{find_repos_cached, find_submodules, RepoProvider},
     tmux::Tmux,
     Result,
 };
@@ -113,7 +113,7 @@ impl SessionContainer for HashMap<String, Session> {
 }
 
 pub fn create_sessions(config: &Config) -> Result<impl SessionContainer> {
-    let mut sessions = find_repos(config)?;
+    let mut sessions = find_repos_cached(config, false)?;
     sessions = append_bookmarks(config, sessions)?;
 
     let sessions = generate_session_container(sessions, config)?;

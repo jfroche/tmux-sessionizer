@@ -48,7 +48,7 @@ pub enum CliCommand {
     /// Show running tmux sessions with asterisk on the current session
     Sessions,
     /// Search and list all discovered repositories
-    Search,
+    Search(SearchCommand),
     #[command(arg_required_else_help = true)]
     /// Rename the active session and the working directory
     Rename(RenameCommand),
@@ -149,6 +149,13 @@ pub struct ConfigArgs {
 }
 
 #[derive(Debug, Args)]
+pub struct SearchCommand {
+    #[arg(long, short)]
+    /// Force refresh cache and rescan all directories
+    refresh: bool,
+}
+
+#[derive(Debug, Args)]
 pub struct RenameCommand {
     /// The new session's name
     name: String,
@@ -227,8 +234,8 @@ impl Cli {
                 Ok(SubCommandGiven::Yes)
             }
 
-            Some(CliCommand::Search) => {
-                search_command(config)?;
+            Some(CliCommand::Search(args)) => {
+                search_command(args, config)?;
                 Ok(SubCommandGiven::Yes)
             }
 
@@ -569,9 +576,9 @@ fn sessions_subcommand(tmux: &Tmux) -> Result<()> {
     Ok(())
 }
 
-fn search_command(config: Config) -> Result<()> {
-    use crate::repos::find_repos;
-    let sessions_map = find_repos(&config)?;
+fn search_command(args: &SearchCommand, config: Config) -> Result<()> {
+    use crate::repos::find_repos_cached;
+    let sessions_map = find_repos_cached(&config, args.refresh)?;
 
     let mut repos: Vec<String> = Vec::new();
     for (key, session_list) in &sessions_map {
