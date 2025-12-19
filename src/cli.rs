@@ -47,6 +47,8 @@ pub enum CliCommand {
     Kill,
     /// Show running tmux sessions with asterisk on the current session
     Sessions,
+    /// Search and list all discovered repositories
+    Search,
     #[command(arg_required_else_help = true)]
     /// Rename the active session and the working directory
     Rename(RenameCommand),
@@ -222,6 +224,11 @@ impl Cli {
             // session
             Some(CliCommand::Sessions) => {
                 sessions_subcommand(tmux)?;
+                Ok(SubCommandGiven::Yes)
+            }
+
+            Some(CliCommand::Search) => {
+                search_command(config)?;
                 Ok(SubCommandGiven::Yes)
             }
 
@@ -558,6 +565,35 @@ fn sessions_subcommand(tmux: &Tmux) -> Result<()> {
     println!("{new_string}");
     std::thread::sleep(std::time::Duration::from_millis(100));
     tmux.refresh_client();
+
+    Ok(())
+}
+
+fn search_command(config: Config) -> Result<()> {
+    use crate::repos::find_repos;
+    let sessions_map = find_repos(&config)?;
+
+    let mut repos: Vec<String> = Vec::new();
+    for (key, session_list) in &sessions_map {
+        // Skip worktree sessions (those with # in the name)
+        if key.contains('#') {
+            continue;
+        }
+        for session in session_list {
+            let display_name = if config.display_full_path == Some(true) {
+                session.path().display().to_string()
+            } else {
+                key.clone()
+            };
+            repos.push(display_name);
+        }
+    }
+    repos.sort();
+    repos.dedup();
+
+    for repo in repos {
+        println!("{}", repo);
+    }
 
     Ok(())
 }
