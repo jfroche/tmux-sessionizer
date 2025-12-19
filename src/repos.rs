@@ -309,7 +309,11 @@ pub fn find_repos(config: &Config) -> Result<HashMap<String, Vec<Session>>> {
 
     search_dirs(config, |file, repo| {
         if repo.is_worktree() {
-            return Ok(());
+            let has_bare_sibling = file.path.join(".bare").exists();
+
+            if !has_bare_sibling {
+                return Ok(());
+            }
         }
 
         let session_name = file
@@ -375,6 +379,12 @@ where
                 if excluder.is_match(&file.path.to_string()?) {
                     continue;
                 }
+            }
+
+            // Skip paths inside git internal directories (.bare or .git)
+            let path_str = file.path.to_string_lossy();
+            if path_str.contains("/.bare/") || path_str.contains("/.git/") {
+                continue;
             }
 
             if let Ok(repo) = RepoProvider::open(&file.path, config) {

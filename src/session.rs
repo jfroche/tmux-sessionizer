@@ -32,6 +32,9 @@ impl Session {
     pub fn path(&self) -> &Path {
         match &self.session_type {
             SessionType::Git(repo) if repo.is_bare() => repo.path(),
+            SessionType::Git(repo) if repo.is_worktree() => {
+                repo.work_dir().unwrap_or_else(|| repo.path().parent().unwrap())
+            }
             SessionType::Git(repo) => repo.path().parent().unwrap(),
             SessionType::Bookmark(path) => path,
         }
