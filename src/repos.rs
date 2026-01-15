@@ -305,7 +305,10 @@ impl RepoProvider {
 }
 
 /// Find repositories with caching support
-pub fn find_repos_cached(config: &Config, force_refresh: bool) -> Result<HashMap<String, Vec<Session>>> {
+pub fn find_repos_cached(
+    config: &Config,
+    force_refresh: bool,
+) -> Result<HashMap<String, Vec<Session>>> {
     use crate::cache::RepoCache;
 
     // Load existing cache if not forcing refresh
@@ -389,7 +392,8 @@ fn find_repos_in_dirs(config: &Config, dirs: &[PathBuf]) -> Result<HashMap<Strin
 
     // Create a temporary config with only the specified directories
     for dir_path in dirs {
-        let max_depth = config.search_dirs()
+        let max_depth = config
+            .search_dirs()
             .change_context(TmsError::ConfigError)?
             .iter()
             .find(|d| d.path == *dir_path)
@@ -539,9 +543,9 @@ where
             match fs::read_dir(&file.path) {
                 Err(ref e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
                     eprintln!(
-                    "Warning: insufficient permissions to read '{0}'. Skipping directory...",
-                    file.path.to_string()?
-                );
+                        "Warning: insufficient permissions to read '{0}'. Skipping directory...",
+                        file.path.to_string()?
+                    );
                 }
                 Err(e) => {
                     let report = report!(e)

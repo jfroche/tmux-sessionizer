@@ -1,7 +1,4 @@
-use crate::{
-    session::Session,
-    Result, TmsError,
-};
+use crate::{session::Session, Result, TmsError};
 use error_stack::{report, ResultExt};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -30,6 +27,12 @@ struct CachedSession {
     is_bare: bool,
 }
 
+impl Default for RepoCache {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl RepoCache {
     pub fn new() -> Self {
         Self {
@@ -47,11 +50,9 @@ impl RepoCache {
             return Ok(None);
         }
 
-        let contents = fs::read_to_string(&cache_path)
-            .change_context(TmsError::IoError)?;
+        let contents = fs::read_to_string(&cache_path).change_context(TmsError::IoError)?;
 
-        let cache: RepoCache = toml::from_str(&contents)
-            .change_context(TmsError::ConfigError)?;
+        let cache: RepoCache = toml::from_str(&contents).change_context(TmsError::ConfigError)?;
 
         // Check version compatibility
         if cache.version != CACHE_VERSION {
@@ -68,24 +69,21 @@ impl RepoCache {
 
         // Ensure cache directory exists
         if let Some(parent) = cache_path.parent() {
-            fs::create_dir_all(parent)
-                .change_context(TmsError::IoError)?;
+            fs::create_dir_all(parent).change_context(TmsError::IoError)?;
         }
 
-        let contents = toml::to_string_pretty(&self)
-            .change_context(TmsError::ConfigError)?;
+        let contents = toml::to_string_pretty(&self).change_context(TmsError::ConfigError)?;
 
-        fs::write(&cache_path, contents)
-            .change_context(TmsError::IoError)?;
+        fs::write(&cache_path, contents).change_context(TmsError::IoError)?;
 
         Ok(())
     }
 
     /// Get the cache file path
     fn cache_path() -> Result<PathBuf> {
-        let cache_dir = dirs::cache_dir()
-            .ok_or_else(|| report!(TmsError::ConfigError)
-                .attach_printable("Could not determine cache directory"))?;
+        let cache_dir = dirs::cache_dir().ok_or_else(|| {
+            report!(TmsError::ConfigError).attach_printable("Could not determine cache directory")
+        })?;
 
         Ok(cache_dir.join("tms").join("repos.cache"))
     }
@@ -113,8 +111,7 @@ impl RepoCache {
             .change_context(TmsError::IoError)
             .attach_printable_lazy(|| format!("Failed to get metadata for {:?}", dir))?;
 
-        metadata.modified()
-            .change_context(TmsError::IoError)
+        metadata.modified().change_context(TmsError::IoError)
     }
 
     /// Add sessions from a directory scan
@@ -149,16 +146,15 @@ impl RepoCache {
 
     /// Remove sessions from a specific directory (for rescanning)
     pub fn remove_dir_sessions(&mut self, dir: &Path) {
-        self.sessions.retain(|_, session_list| {
-            session_list.iter().any(|s| !s.path.starts_with(dir))
-        });
+        self.sessions
+            .retain(|_, session_list| session_list.iter().any(|s| !s.path.starts_with(dir)));
     }
 
     /// Convert cache back to session HashMap
     pub fn to_sessions(&self) -> HashMap<String, Vec<Session>> {
-        use crate::session::{Session, SessionType};
-        use crate::repos::RepoProvider;
         use crate::configs::Config;
+        use crate::repos::RepoProvider;
+        use crate::session::{Session, SessionType};
 
         let mut result = HashMap::new();
         let config = Config::new().ok();
@@ -170,10 +166,7 @@ impl RepoCache {
                     // Try to reopen the repository
                     if let Some(ref cfg) = config {
                         if let Ok(repo) = RepoProvider::open(&cached.path, cfg) {
-                            return Some(Session::new(
-                                cached.name.clone(),
-                                SessionType::Git(repo),
-                            ));
+                            return Some(Session::new(cached.name.clone(), SessionType::Git(repo)));
                         }
                     }
 
