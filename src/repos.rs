@@ -404,9 +404,15 @@ fn find_repos_in_dirs(config: &Config, dirs: &[PathBuf]) -> Result<HashMap<Strin
 
         search_dir_single(config, search_dir, &mut |file, repo| {
             if repo.is_worktree() {
-                let has_bare_sibling = file.path.join(".bare").exists();
+                // Check for .bare in parent directory (for worktrees like repo/main/)
+                // or as a child (for parent directories like repo/ with .bare inside)
+                let has_bare = file.path.join(".bare").exists()
+                    || file
+                        .path
+                        .parent()
+                        .is_some_and(|parent| parent.join(".bare").exists());
 
-                if !has_bare_sibling {
+                if !has_bare {
                     return Ok(());
                 }
             }
@@ -458,9 +464,15 @@ fn find_repos_impl(config: &Config) -> Result<HashMap<String, Vec<Session>>> {
 
     search_dirs(config, &mut |file: SearchDirectory, repo: RepoProvider| {
         if repo.is_worktree() {
-            let has_bare_sibling = file.path.join(".bare").exists();
+            // Check for .bare in parent directory (for worktrees like repo/main/)
+            // or as a child (for parent directories like repo/ with .bare inside)
+            let has_bare = file.path.join(".bare").exists()
+                || file
+                    .path
+                    .parent()
+                    .is_some_and(|parent| parent.join(".bare").exists());
 
-            if !has_bare_sibling {
+            if !has_bare {
                 return Ok(());
             }
         }
