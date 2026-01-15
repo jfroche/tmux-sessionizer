@@ -686,6 +686,8 @@ fn refresh_command(args: &RefreshCommand, config: Config, tmux: &Tmux) -> Result
         .collect();
 
     if let Ok(repository) = RepoProvider::open(Path::new(&session_path), &config) {
+        let session_path_buf = Path::new(&session_path);
+        let canonical_session_path = std::fs::canonicalize(&session_path).ok();
         let mut num_worktree_windows = 0;
         if let Ok(worktrees) = repository.worktrees(&config) {
             for worktree in worktrees.iter() {
@@ -698,10 +700,24 @@ fn refresh_command(args: &RefreshCommand, config: Config, tmux: &Tmux) -> Result
                     // prunable worktrees can have an invalid path so skip that
                     continue;
                 }
+                let worktree_path = worktree.path()?;
+                // Skip worktrees whose path matches the session path (e.g., the root
+                // directory of a bare repo setup or the main worktree). Compare both
+                // raw paths and canonicalized paths to handle symlinks.
+                if worktree_path == session_path_buf {
+                    continue;
+                }
+                if let Some(ref canonical_session) = canonical_session_path {
+                    if let Ok(canonical_worktree) = std::fs::canonicalize(&worktree_path) {
+                        if &canonical_worktree == canonical_session {
+                            continue;
+                        }
+                    }
+                }
                 num_worktree_windows += 1;
                 tmux.new_window(
                     Some(&worktree_name),
-                    Some(&worktree.path()?.to_string()?),
+                    Some(&worktree_path.to_string()?),
                     Some(&session_name),
                 );
             }
