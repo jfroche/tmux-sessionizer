@@ -403,16 +403,17 @@ fn find_repos_in_dirs(config: &Config, dirs: &[PathBuf]) -> Result<HashMap<Strin
         let search_dir = SearchDirectory::new(dir_path.clone(), max_depth);
 
         search_dir_single(config, search_dir, &mut |file, repo| {
-            if repo.is_worktree() {
-                // Check for .bare in parent directory (for worktrees like repo/main/)
-                // or as a child (for parent directories like repo/ with .bare inside)
-                let has_bare = file.path.join(".bare").exists()
-                    || file
-                        .path
-                        .parent()
-                        .is_some_and(|parent| parent.join(".bare").exists());
+            // Check if this is a parent directory containing .bare (worktree root)
+            let is_bare_worktree_root = file.path.join(".bare").exists();
 
-                if !has_bare {
+            if repo.is_worktree() {
+                // For worktrees, check for .bare in parent directory
+                let has_bare_sibling = file
+                    .path
+                    .parent()
+                    .is_some_and(|parent| parent.join(".bare").exists());
+
+                if !is_bare_worktree_root && !has_bare_sibling {
                     return Ok(());
                 }
             }
@@ -446,6 +447,12 @@ fn find_repos_in_dirs(config: &Config, dirs: &[PathBuf]) -> Result<HashMap<Strin
                 }
             }
 
+            // Skip adding the parent directory as a session if it contains .bare
+            // (only the worktrees inside should be selectable)
+            if is_bare_worktree_root {
+                return Ok(());
+            }
+
             let session = Session::new(session_name, SessionType::Git(repo));
             if let Some(list) = repos.get_mut(&session.name) {
                 list.push(session);
@@ -463,16 +470,17 @@ fn find_repos_impl(config: &Config) -> Result<HashMap<String, Vec<Session>>> {
     let mut repos: HashMap<String, Vec<Session>> = HashMap::new();
 
     search_dirs(config, &mut |file: SearchDirectory, repo: RepoProvider| {
-        if repo.is_worktree() {
-            // Check for .bare in parent directory (for worktrees like repo/main/)
-            // or as a child (for parent directories like repo/ with .bare inside)
-            let has_bare = file.path.join(".bare").exists()
-                || file
-                    .path
-                    .parent()
-                    .is_some_and(|parent| parent.join(".bare").exists());
+        // Check if this is a parent directory containing .bare (worktree root)
+        let is_bare_worktree_root = file.path.join(".bare").exists();
 
-            if !has_bare {
+        if repo.is_worktree() {
+            // For worktrees, check for .bare in parent directory
+            let has_bare_sibling = file
+                .path
+                .parent()
+                .is_some_and(|parent| parent.join(".bare").exists());
+
+            if !is_bare_worktree_root && !has_bare_sibling {
                 return Ok(());
             }
         }
@@ -504,6 +512,12 @@ fn find_repos_impl(config: &Config) -> Result<HashMap<String, Vec<Session>>> {
                     repos.insert(session.name.clone(), vec![session]);
                 }
             }
+        }
+
+        // Skip adding the parent directory as a session if it contains .bare
+        // (only the worktrees inside should be selectable)
+        if is_bare_worktree_root {
+            return Ok(());
         }
 
         let session = Session::new(session_name, SessionType::Git(repo));
