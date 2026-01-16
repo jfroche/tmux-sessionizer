@@ -582,10 +582,6 @@ fn search_command(args: &SearchCommand, config: Config) -> Result<()> {
 
     let mut repos: Vec<String> = Vec::new();
     for (key, session_list) in &sessions_map {
-        // Skip worktree sessions (those with # in the name)
-        if key.contains('#') {
-            continue;
-        }
         for session in session_list {
             let display_name = if config.display_full_path == Some(true) {
                 session.path().display().to_string()
