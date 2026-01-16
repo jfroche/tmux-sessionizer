@@ -693,7 +693,6 @@ fn refresh_command(args: &RefreshCommand, config: Config, tmux: &Tmux) -> Result
                     continue;
                 }
                 if worktree.is_prunable() {
-                    // prunable worktrees can have an invalid path so skip that
                     continue;
                 }
                 let worktree_path = worktree.path()?;
@@ -718,8 +717,9 @@ fn refresh_command(args: &RefreshCommand, config: Config, tmux: &Tmux) -> Result
                 );
             }
         }
-        //check if a window is needed for non worktree
-        if !repository.is_bare() {
+        // Check if a window is needed for non-worktree repo.
+        // Skip if session is already in a worktree (that worktree window serves as main).
+        if !repository.is_bare() && !repository.is_worktree() {
             let count_current_windows = tmux
                 .list_windows("'#{window_name}'", Some(&session_name))
                 .lines()
