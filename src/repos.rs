@@ -435,10 +435,8 @@ fn find_repos_in_dirs(config: &Config, dirs: &[PathBuf]) -> Result<HashMap<Strin
                     let Ok(sub) = RepoProvider::open(&worktree_path, config) else {
                         continue;
                     };
-                    let session = Session::new(
-                        format!("{}#{}", session_name, worktree.name()),
-                        SessionType::Git(sub),
-                    );
+                    // Session name is just the repo name - worktrees become windows, not sessions
+                    let session = Session::new(session_name.clone(), SessionType::Git(sub));
                     if let Some(list) = repos.get_mut(&session.name) {
                         list.push(session);
                     } else {
@@ -448,9 +446,21 @@ fn find_repos_in_dirs(config: &Config, dirs: &[PathBuf]) -> Result<HashMap<Strin
             }
 
             // Skip adding the parent directory as a session if it contains .bare
-            // (only the worktrees inside should be selectable)
+            // (only the worktrees inside should be selectable via parent's worktree listing)
             if is_bare_worktree_root {
                 return Ok(());
+            }
+
+            // Skip adding worktrees directly if they have .bare in parent - they're
+            // already added via the parent's worktree listing with proper naming
+            if repo.is_worktree() {
+                let has_bare_sibling = file
+                    .path
+                    .parent()
+                    .is_some_and(|parent| parent.join(".bare").exists());
+                if has_bare_sibling {
+                    return Ok(());
+                }
             }
 
             let session = Session::new(session_name, SessionType::Git(repo));
@@ -502,10 +512,8 @@ fn find_repos_impl(config: &Config) -> Result<HashMap<String, Vec<Session>>> {
                 let Ok(sub) = RepoProvider::open(&worktree_path, config) else {
                     continue;
                 };
-                let session = Session::new(
-                    format!("{}#{}", session_name, worktree.name()),
-                    SessionType::Git(sub),
-                );
+                // Session name is just the repo name - worktrees become windows, not sessions
+                let session = Session::new(session_name.clone(), SessionType::Git(sub));
                 if let Some(list) = repos.get_mut(&session.name) {
                     list.push(session);
                 } else {
@@ -515,9 +523,21 @@ fn find_repos_impl(config: &Config) -> Result<HashMap<String, Vec<Session>>> {
         }
 
         // Skip adding the parent directory as a session if it contains .bare
-        // (only the worktrees inside should be selectable)
+        // (only the worktrees inside should be selectable via parent's worktree listing)
         if is_bare_worktree_root {
             return Ok(());
+        }
+
+        // Skip adding worktrees directly if they have .bare in parent - they're
+        // already added via the parent's worktree listing with proper naming
+        if repo.is_worktree() {
+            let has_bare_sibling = file
+                .path
+                .parent()
+                .is_some_and(|parent| parent.join(".bare").exists());
+            if has_bare_sibling {
+                return Ok(());
+            }
         }
 
         let session = Session::new(session_name, SessionType::Git(repo));
