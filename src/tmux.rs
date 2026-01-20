@@ -258,6 +258,8 @@ impl Tmux {
         // For worktrees, find the parent repo to enumerate all worktrees
         let (main_repo, is_bare_worktree_setup) = if repo.is_worktree() {
             if let Some(main_path) = repo.main_repo() {
+                // Canonicalize the path to resolve .. components from gix
+                let main_path = main_path.canonicalize().unwrap_or(main_path);
                 // The main_repo path points to .bare, go up to parent directory
                 if let Some(parent) = main_path.parent() {
                     // Check if this is a .bare worktree setup
