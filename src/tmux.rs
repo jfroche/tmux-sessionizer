@@ -255,10 +255,29 @@ impl Tmux {
         repo_name: &str,
         config: &Config,
     ) -> Result<()> {
-        if repo.is_worktree() {
-            return Ok(());
-        }
-        let worktrees = repo.worktrees(config).change_context(TmsError::GitError)?;
+        // For worktrees, find the parent repo to enumerate all worktrees
+        let (main_repo, is_bare_worktree_setup) = if repo.is_worktree() {
+            if let Some(main_path) = repo.main_repo() {
+                // The main_repo path points to .bare, go up to parent directory
+                if let Some(parent) = main_path.parent() {
+                    // Check if this is a .bare worktree setup
+                    let has_bare = parent.join(".bare").exists();
+                    (RepoProvider::open(parent, config).ok(), has_bare)
+                } else {
+                    (None, false)
+                }
+            } else {
+                (None, false)
+            }
+        } else {
+            (None, false)
+        };
+        let effective_repo = main_repo.as_ref().unwrap_or(repo);
+        let is_bare = effective_repo.is_bare() || is_bare_worktree_setup;
+
+        let worktrees = effective_repo
+            .worktrees(config)
+            .change_context(TmsError::GitError)?;
         let worktrees = worktrees
             .iter()
             // check only for non prunable worktrees
@@ -266,17 +285,17 @@ impl Tmux {
             .collect::<Vec<_>>();
         let mut windows = Vec::new();
         if worktrees.is_empty() {
-            if !repo.is_bare() {
+            if !is_bare {
                 return Ok(());
             }
-            if let Some((name, path)) = repo.add_worktree(repo.path())? {
+            if let Some((name, path)) = effective_repo.add_worktree(effective_repo.path())? {
                 windows.push((name, path));
             }
         }
 
         // Moves the inital window to index 0 so it doesn't clash with tmux configs which use
         // index 1 as the start
-        if repo.is_bare() {
+        if is_bare {
             self.move_window(&format!("{repo_name}:^"), &format!("{repo_name}:0"));
         }
 
@@ -299,7 +318,7 @@ impl Tmux {
         }
 
         // Kill that first initial window
-        if repo.is_bare() {
+        if is_bare {
             self.kill_window(&format!("{repo_name}:^"));
         }
         Ok(())
