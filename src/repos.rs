@@ -304,176 +304,17 @@ impl RepoProvider {
     }
 }
 
-/// Find repositories with caching support
+/// Find repositories across configured search directories.
+///
+/// The `_force_refresh` parameter is retained for API compatibility but has no
+/// effect: every call performs a fresh scan. The scan is fast because the BFS
+/// loop uses a cheap `.git`/`.jj` existence check to skip non-repo directories
+/// before attempting the expensive `RepoProvider::open`.
 pub fn find_repos_cached(
     config: &Config,
-    force_refresh: bool,
+    _force_refresh: bool,
 ) -> Result<HashMap<String, Vec<Session>>> {
-    use crate::cache::RepoCache;
-
-    // Load existing cache if not forcing refresh
-    let cache = if force_refresh {
-        None
-    } else {
-        RepoCache::load().unwrap_or(None)
-    };
-
-    let search_dirs = config.search_dirs().change_context(TmsError::ConfigError)?;
-    let mut needs_full_scan = cache.is_none();
-    let mut dirs_to_rescan = Vec::new();
-
-    // Check which directories need rescanning
-    if let Some(ref cache) = cache {
-        for dir in &search_dirs {
-            if cache.needs_rescan(&dir.path).unwrap_or(true) {
-                dirs_to_rescan.push(dir.path.clone());
-            }
-        }
-        needs_full_scan = !dirs_to_rescan.is_empty();
-    }
-
-    // If no cache or directories changed, do full scan
-    if needs_full_scan {
-        let mut new_cache = cache.unwrap_or_else(RepoCache::new);
-
-        if dirs_to_rescan.is_empty() {
-            // Full scan - no cache
-            let repos = find_repos_impl(config)?;
-            new_cache.add_sessions(repos);
-
-            // Update timestamps for all search dirs
-            for dir in &search_dirs {
-                let _ = new_cache.update_dir_timestamp(dir.path.clone());
-            }
-
-            // Save cache
-            let _ = new_cache.save();
-
-            // Return from cache
-            return Ok(new_cache.to_sessions());
-        } else {
-            // Incremental scan - rescan only modified directories
-            for dir in &dirs_to_rescan {
-                // Remove old sessions from this directory
-                new_cache.remove_dir_sessions(dir);
-            }
-
-            // Scan only modified directories
-            let new_repos = find_repos_in_dirs(config, &dirs_to_rescan)?;
-            new_cache.add_sessions(new_repos);
-
-            // Update timestamps
-            for dir in &dirs_to_rescan {
-                let _ = new_cache.update_dir_timestamp(dir.clone());
-            }
-
-            // Save cache
-            let _ = new_cache.save();
-
-            // Return combined results from cache
-            return Ok(new_cache.to_sessions());
-        }
-    }
-
-    // Use cached results
-    Ok(cache.unwrap().to_sessions())
-}
-
-/// Find repositories without caching (original implementation)
-pub fn find_repos(config: &Config) -> Result<HashMap<String, Vec<Session>>> {
     find_repos_impl(config)
-}
-
-/// Find repositories only in specific directories
-fn find_repos_in_dirs(config: &Config, dirs: &[PathBuf]) -> Result<HashMap<String, Vec<Session>>> {
-    use crate::configs::SearchDirectory;
-
-    let mut repos: HashMap<String, Vec<Session>> = HashMap::new();
-
-    // Create a temporary config with only the specified directories
-    for dir_path in dirs {
-        let max_depth = config
-            .search_dirs()
-            .change_context(TmsError::ConfigError)?
-            .iter()
-            .find(|d| d.path == *dir_path)
-            .map(|d| d.depth)
-            .unwrap_or(10);
-
-        let search_dir = SearchDirectory::new(dir_path.clone(), max_depth);
-
-        search_dir_single(config, search_dir, &mut |file, repo| {
-            // Check if this is a parent directory containing .bare (worktree root)
-            let is_bare_worktree_root = file.path.join(".bare").exists();
-
-            if repo.is_worktree() {
-                // For worktrees, check for .bare in parent directory
-                let has_bare_sibling = file
-                    .path
-                    .parent()
-                    .is_some_and(|parent| parent.join(".bare").exists());
-
-                if !is_bare_worktree_root && !has_bare_sibling {
-                    return Ok(());
-                }
-            }
-
-            let session_name = file
-                .path
-                .file_name()
-                .ok_or_else(|| {
-                    Report::new(TmsError::GitError).attach_printable("Not a valid repository name")
-                })?
-                .to_string()?;
-
-            if let Some(true) = config.list_worktrees {
-                for worktree in repo.worktrees(config)?.iter() {
-                    let worktree_path = match worktree.path() {
-                        Ok(path) => path,
-                        Err(_) => continue,
-                    };
-                    let Ok(sub) = RepoProvider::open(&worktree_path, config) else {
-                        continue;
-                    };
-                    // Session name is just the repo name - worktrees become windows, not sessions
-                    let session = Session::new(session_name.clone(), SessionType::Git(sub));
-                    if let Some(list) = repos.get_mut(&session.name) {
-                        list.push(session);
-                    } else {
-                        repos.insert(session.name.clone(), vec![session]);
-                    }
-                }
-            }
-
-            // Skip adding the parent directory as a session if it contains .bare
-            // (only the worktrees inside should be selectable via parent's worktree listing)
-            if is_bare_worktree_root {
-                return Ok(());
-            }
-
-            // Skip adding worktrees directly if they have .bare in parent - they're
-            // already added via the parent's worktree listing with proper naming
-            if repo.is_worktree() {
-                let has_bare_sibling = file
-                    .path
-                    .parent()
-                    .is_some_and(|parent| parent.join(".bare").exists());
-                if has_bare_sibling {
-                    return Ok(());
-                }
-            }
-
-            let session = Session::new(session_name, SessionType::Git(repo));
-            if let Some(list) = repos.get_mut(&session.name) {
-                list.push(session);
-            } else {
-                repos.insert(session.name.clone(), vec![session]);
-            }
-            Ok(())
-        })?;
-    }
-
-    Ok(repos)
 }
 
 fn find_repos_impl(config: &Config) -> Result<HashMap<String, Vec<Session>>> {
@@ -551,75 +392,6 @@ fn find_repos_impl(config: &Config) -> Result<HashMap<String, Vec<Session>>> {
     Ok(repos)
 }
 
-/// Search a single directory
-fn search_dir_single<F>(config: &Config, start_dir: SearchDirectory, f: &mut F) -> Result<()>
-where
-    F: FnMut(SearchDirectory, RepoProvider) -> Result<()>,
-{
-    let mut to_search: VecDeque<SearchDirectory> = VecDeque::new();
-    to_search.push_back(start_dir);
-
-    let excluder = if let Some(excluded_dirs) = &config.excluded_dirs {
-        Some(
-            AhoCorasickBuilder::new()
-                .match_kind(MatchKind::LeftmostFirst)
-                .build(excluded_dirs)
-                .change_context(TmsError::IoError)?,
-        )
-    } else {
-        None
-    };
-
-    while let Some(file) = to_search.pop_front() {
-        if let Some(ref excluder) = excluder {
-            if excluder.is_match(&file.path.to_string()?) {
-                continue;
-            }
-        }
-
-        // Skip paths inside git internal directories (.bare or .git)
-        let path_str = file.path.to_string_lossy();
-        if path_str.contains("/.bare/") || path_str.contains("/.git/") {
-            continue;
-        }
-
-        if let Ok(repo) = RepoProvider::open(&file.path, config) {
-            f(file, repo)?;
-        } else if file.path.is_dir() && file.depth > 0 {
-            match fs::read_dir(&file.path) {
-                Err(ref e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
-                    eprintln!(
-                        "Warning: insufficient permissions to read '{0}'. Skipping directory...",
-                        file.path.to_string()?
-                    );
-                }
-                Err(e) => {
-                    let report = report!(e)
-                        .change_context(TmsError::IoError)
-                        .attach_printable(format!("Could not read directory {:?}", file.path));
-                    return Err(report);
-                }
-                Ok(read_dir) => {
-                    let mut subdirs = read_dir
-                        .filter_map(|dir_entry| {
-                            if let Ok(dir) = dir_entry {
-                                Some(SearchDirectory::new(dir.path(), file.depth - 1))
-                            } else {
-                                None
-                            }
-                        })
-                        .collect::<VecDeque<SearchDirectory>>();
-
-                    if !subdirs.is_empty() {
-                        to_search.append(&mut subdirs);
-                    }
-                }
-            }
-        }
-    }
-    Ok(())
-}
-
 fn search_dirs<F>(config: &Config, mut f: F) -> Result<()>
 where
     F: FnMut(SearchDirectory, RepoProvider) -> Result<()>,
@@ -652,8 +424,12 @@ where
                 continue;
             }
 
-            if let Ok(repo) = RepoProvider::open(&file.path, config) {
-                f(file, repo)?;
+            let has_repo_marker = file.path.join(".git").exists() || file.path.join(".jj").exists();
+
+            if has_repo_marker {
+                if let Ok(repo) = RepoProvider::open(&file.path, config) {
+                    f(file, repo)?;
+                }
             } else if file.path.is_dir() && file.depth > 0 {
                 match fs::read_dir(&file.path) {
                     Err(ref e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
